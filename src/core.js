@@ -183,7 +183,32 @@ function centred(pts, draw) {
   push(); translate(cx, cy); draw(pts.map(([x, y]) => [x - cx, y - cy])); pop();
 }
 function paint(pts, o = {}) { centred(pts, (P) => paintAt(P, o)); }
+// PROJECT.fills = false: for machines without a GPU, where software WebGL takes ~1.5 s per watercolour fill. Each fill is
+// then imitated with a few translucent washes, each a slightly different, boiling size, so it keeps a darker body and a
+// soft, uneven edge like a bleed. Ink, hatches and small washes stay cheap; frame-sized areas want flat() below.
+const FILLS = PROJECT.fills !== false;
+function fakeFill(pts, o) {
+  let r = 0; for (const [x, y] of pts) r = Math.max(r, Math.hypot(x, y));
+  const b = o.bleed ?? .1, op = (o.fillOp ?? 170) / 255, layers = [[1 + .5 * b + .01, .3], [1, .38], [1 - .6 * b - .03, .3]];
+  brush.noFill(); brush.noHatch(); brush.noStroke();
+  for (const [s, a] of layers) {
+    brush.wash(o.fill, 255 * op * a * 1.25);
+    brush.polygon(pts.map(([x, y]) => [x * s + jit(r * .012 + 1), y * s + jit(r * .012 + 1)]));
+  }
+}
+// flat(pts, col, a): a big background area (sky, hills, ground) in plain flat colour. A full-opacity wash IS a flat colour,
+// so it looks the same, but software WebGL spends ~1.3 s compositing a frame-sized wash and next to nothing on this.
+// It draws immediately while brush marks are deferred, so call it only before the frame's first brush call.
+function flat(pts, col, a = 255) {
+  const c = color(col); c.setAlpha(a);
+  push(); noStroke(); fill(c); beginShape(); for (const p of pts) vertex(p[0], p[1]); endShape(CLOSE); pop();
+}
 function paintAt(pts, o) {
+  if (o.fill && !FILLS) {
+    if (o.wash) paintAt(pts, { wash: o.wash, washOp: o.washOp, curv: o.curv, ink: null });
+    fakeFill(pts, o);
+    o = { ...o, wash: null, fill: null };
+  }
   if (o.wash || o.fill || o.hatch) {
     if (o.wash) brush.wash(o.wash, o.washOp ?? 255); else brush.noWash();
     if (o.fill) { brush.fill(o.fill, o.fillOp ?? 170); brush.fillBleed(o.bleed ?? .1); brush.fillTexture(o.tex ?? .4, o.border ?? .35); } else brush.noFill();
